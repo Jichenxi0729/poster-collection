@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>剧照收集</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+    <div id="app">
+        <header class="header">
+            <h1 class="header-title">剧照收集</h1>
+            <div class="header-actions">
+                <button id="importBtn" class="btn btn-secondary">批量导入</button>
+                <button id="addBtn" class="btn btn-primary">+ 添加</button>
+            </div>
+        </header>
+
+        <main id="mainContent">
+            <div id="filterBar" class="filter-bar">
+                <input type="text" id="searchInput" placeholder="搜索剧名、人物..." class="search-input">
+                <select id="yearFilter" class="filter-select">
+                    <option value="">全部年份</option>
+                </select>
+                <button id="filterToggle" class="btn btn-secondary">筛选</button>
+            </div>
+
+            <div id="advancedFilters" class="advanced-filters hidden">
+                <input type="text" id="characterFilter" placeholder="人物" class="filter-input">
+                <input type="text" id="identityFilter" placeholder="身份" class="filter-input">
+                <button id="applyFilters" class="btn btn-primary">应用筛选</button>
+                <button id="resetFilters" class="btn btn-secondary">重置</button>
+            </div>
+
+            <div id="cardGrid" class="card-grid"></div>
+            <div id="emptyState" class="empty-state hidden">
+                <p>还没有剧照，点击右上角添加第一张吧！</p>
+            </div>
+        </main>
+
+        <div id="formModal" class="modal hidden">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2 id="modalTitle">添加作品</h2>
+                    <button id="closeModal" class="close-btn">&times;</button>
+                </div>
+                <form id="workForm" class="work-form">
+                    <input type="hidden" id="workId">
+                    
+                    <div class="form-group">
+                        <label>剧名 *</label>
+                        <input type="text" id="title" required>
+                    </div>
+                    
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>年份 *</label>
+                            <input type="number" id="year" required min="1900" max="2100">
+                        </div>
+                        <div class="form-group">
+                            <label>集数</label>
+                            <input type="number" id="episode" min="1">
+                        </div>
+                    </div>
+                    
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>人物</label>
+                            <input type="text" id="character">
+                        </div>
+                        <div class="form-group">
+                            <label>身份</label>
+                            <input type="text" id="identity">
+                        </div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>时间戳</label>
+                        <input type="text" id="timestamp" placeholder="例如：01:23:45">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>剧照</label>
+                        <div id="uploadArea" class="upload-area">
+                            <input type="file" id="photoInput" accept="image/*" multiple capture="environment">
+                            <div class="upload-placeholder">
+                                <span>点击或拖拽上传</span>
+                                <span class="upload-hint">支持多张，比例 16:9</span>
+                            </div>
+                        </div>
+                        <div id="photoPreview" class="photo-preview"></div>
+                    </div>
+                    
+                    <div class="form-actions">
+                        <button type="button" id="cancelBtn" class="btn btn-secondary">取消</button>
+                        <button type="submit" class="btn btn-primary">保存</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <div id="detailModal" class="modal hidden">
+            <div class="modal-content detail-modal">
+                <div class="modal-header">
+                    <h2 id="detailTitle"></h2>
+                    <button id="closeDetail" class="close-btn">&times;</button>
+                </div>
+                <div id="detailContent" class="detail-content"></div>
+                <div class="detail-actions">
+                    <button id="editBtn" class="btn btn-secondary">编辑</button>
+                    <button id="deleteBtn" class="btn btn-danger">删除</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="importModal" class="modal hidden">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>批量导入</h2>
+                    <button id="closeImport" class="close-btn">&times;</button>
+                </div>
+                <div class="import-content">
+                    <div class="form-group">
+                        <label>选择CSV或Excel文件</label>
+                        <div class="upload-area">
+                            <input type="file" id="importFileInput" accept=".csv,.xlsx,.xls">
+                            <div class="upload-placeholder">
+                                <span>点击或拖拽上传</span>
+                                <span class="upload-hint">支持 .csv, .xlsx, .xls 格式</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div id="importPreview" class="import-preview hidden">
+                        <h3>预览（前10条）</h3>
+                        <div class="preview-table-container">
+                            <table class="preview-table"></table>
+                        </div>
+                        <p class="import-count"></p>
+                    </div>
+
+                    <div class="import-template">
+                        <h4>模板格式说明</h4>
+                        <p>列名：剧名, 年份, 集数, 人物, 身份, 时间戳</p>
+                        <p>* 必填：剧名、年份</p>
+                        <button id="downloadTemplate" class="btn btn-secondary">下载示例CSV</button>
+                    </div>
+
+                    <div class="form-actions">
+                        <button type="button" id="cancelImport" class="btn btn-secondary">取消</button>
+                        <button type="button" id="confirmImport" class="btn btn-primary" disabled>确认导入</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
