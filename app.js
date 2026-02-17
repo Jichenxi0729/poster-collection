@@ -90,6 +90,15 @@ class App {
             character: '',
             identity: ''
         };
+        // 图片查看器相关
+        this.viewerData = {
+            photos: [],
+            currentIndex: 0,
+            scale: 1,
+            position: { x: 0, y: 0 },
+            isDragging: false,
+            startPos: { x: 0, y: 0 }
+        };
     }
 
     async init() {
@@ -134,6 +143,30 @@ class App {
         document.getElementById('importFileInput').addEventListener('change', (e) => this.handleImportFile(e));
         document.getElementById('confirmImport').addEventListener('click', () => this.confirmImport());
         document.getElementById('downloadTemplate').addEventListener('click', () => this.downloadTemplate());
+        
+        // 图片查看器事件
+        document.getElementById('closeViewer').addEventListener('click', () => this.closeImageViewer());
+        document.getElementById('prevImage').addEventListener('click', () => this.showPrevImage());
+        document.getElementById('nextImage').addEventListener('click', () => this.showNextImage());
+        
+        // 图片容器事件
+        const imageContainer = document.querySelector('.image-container');
+        imageContainer.addEventListener('mousedown', (e) => this.startDrag(e));
+        imageContainer.addEventListener('mousemove', (e) => this.drag(e));
+        imageContainer.addEventListener('mouseup', () => this.endDrag());
+        imageContainer.addEventListener('mouseleave', () => this.endDrag());
+        
+        // 触摸事件
+        imageContainer.addEventListener('touchstart', (e) => this.startDrag(e));
+        imageContainer.addEventListener('touchmove', (e) => this.drag(e));
+        imageContainer.addEventListener('touchend', () => this.endDrag());
+        
+        // 滚轮缩放
+        imageContainer.addEventListener('wheel', (e) => this.zoom(e));
+        
+        // 双击缩放
+        const viewerImage = document.getElementById('viewerImage');
+        viewerImage.addEventListener('dblclick', (e) => this.doubleClickZoom(e));
     }
 
     toggleAdvancedFilters() {
@@ -330,13 +363,21 @@ class App {
             </div>
             ${hasPhotos 
                 ? `<div class="detail-gallery">
-                    ${work.photos.map(photo => `<img src="${photo}">`).join('')}
+                    ${work.photos.map(photo => `<img src="${photo}" data-photo="${photo}">`).join('')}
                    </div>`
                 : `<div class="no-photos-placeholder">
                     <p>暂无剧照，点击「编辑」添加</p>
                    </div>`
             }
         `;
+
+        // 为图片添加点击事件
+        if (hasPhotos) {
+            const gallery = document.querySelector('.detail-gallery');
+            gallery.querySelectorAll('img').forEach((img, index) => {
+                img.addEventListener('click', () => this.openImageViewer(work.photos, index));
+            });
+        }
 
         document.getElementById('detailModal').classList.remove('hidden');
     }
@@ -555,6 +596,122 @@ class App {
         link.href = URL.createObjectURL(blob);
         link.download = '剧照导入模板.csv';
         link.click();
+    }
+
+    // 图片查看器方法
+    openImageViewer(photos, index = 0) {
+        this.viewerData.photos = photos;
+        this.viewerData.currentIndex = index;
+        this.resetViewer();
+        this.updateViewer();
+        document.getElementById('imageViewer').classList.remove('hidden');
+    }
+
+    closeImageViewer() {
+        document.getElementById('imageViewer').classList.add('hidden');
+        this.resetViewer();
+    }
+
+    showPrevImage() {
+        if (this.viewerData.currentIndex > 0) {
+            this.viewerData.currentIndex--;
+            this.resetViewer();
+            this.updateViewer();
+        }
+    }
+
+    showNextImage() {
+        if (this.viewerData.currentIndex < this.viewerData.photos.length - 1) {
+            this.viewerData.currentIndex++;
+            this.resetViewer();
+            this.updateViewer();
+        }
+    }
+
+    updateViewer() {
+        const image = document.getElementById('viewerImage');
+        const counter = document.getElementById('imageCounter');
+        const prevBtn = document.getElementById('prevImage');
+        const nextBtn = document.getElementById('nextImage');
+
+        // 更新图片
+        image.src = this.viewerData.photos[this.viewerData.currentIndex];
+        
+        // 更新计数器
+        counter.textContent = `${this.viewerData.currentIndex + 1} / ${this.viewerData.photos.length}`;
+        
+        // 更新按钮状态
+        prevBtn.disabled = this.viewerData.currentIndex === 0;
+        nextBtn.disabled = this.viewerData.currentIndex === this.viewerData.photos.length - 1;
+        
+        // 更新图片样式
+        this.updateImageStyle();
+    }
+
+    resetViewer() {
+        this.viewerData.scale = 1;
+        this.viewerData.position = { x: 0, y: 0 };
+        this.viewerData.isDragging = false;
+    }
+
+    updateImageStyle() {
+        const image = document.getElementById('viewerImage');
+        image.style.transform = `translate(${this.viewerData.position.x}px, ${this.viewerData.position.y}px) scale(${this.viewerData.scale})`;
+    }
+
+    startDrag(e) {
+        e.preventDefault();
+        this.viewerData.isDragging = true;
+        
+        if (e.type === 'touchstart') {
+            this.viewerData.startPos.x = e.touches[0].clientX - this.viewerData.position.x;
+            this.viewerData.startPos.y = e.touches[0].clientY - this.viewerData.position.y;
+        } else {
+            this.viewerData.startPos.x = e.clientX - this.viewerData.position.x;
+            this.viewerData.startPos.y = e.clientY - this.viewerData.position.y;
+        }
+    }
+
+    drag(e) {
+        if (!this.viewerData.isDragging) return;
+        e.preventDefault();
+        
+        if (e.type === 'touchmove') {
+            this.viewerData.position.x = e.touches[0].clientX - this.viewerData.startPos.x;
+            this.viewerData.position.y = e.touches[0].clientY - this.viewerData.startPos.y;
+        } else {
+            this.viewerData.position.x = e.clientX - this.viewerData.startPos.x;
+            this.viewerData.position.y = e.clientY - this.viewerData.startPos.y;
+        }
+        
+        this.updateImageStyle();
+    }
+
+    endDrag() {
+        this.viewerData.isDragging = false;
+    }
+
+    zoom(e) {
+        e.preventDefault();
+        const scaleFactor = e.deltaY > 0 ? 0.9 : 1.1;
+        this.viewerData.scale *= scaleFactor;
+        
+        // 限制缩放范围
+        this.viewerData.scale = Math.max(0.5, Math.min(this.viewerData.scale, 3));
+        
+        this.updateImageStyle();
+    }
+
+    doubleClickZoom(e) {
+        e.preventDefault();
+        if (this.viewerData.scale === 1) {
+            // 放大到2倍
+            this.viewerData.scale = 2;
+        } else {
+            // 重置到1倍
+            this.resetViewer();
+        }
+        this.updateImageStyle();
     }
 }
 
