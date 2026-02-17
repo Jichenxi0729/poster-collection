@@ -262,8 +262,11 @@ body {
 
 .card-tag {
     padding: 4px 10px;
-    background: var(--background);
+    background: rgba(99, 102, 241, 0.1);
+    color: var(--primary);
+    font-weight: 500;
     border-radius: 20px;
+    border: 1px solid rgba(99, 102, 241, 0.2);
 }
 
 .empty-state {
