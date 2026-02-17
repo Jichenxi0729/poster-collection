@@ -97,7 +97,11 @@ class App {
             scale: 1,
             position: { x: 0, y: 0 },
             isDragging: false,
-            startPos: { x: 0, y: 0 }
+            startPos: { x: 0, y: 0 },
+            // 双指缩放相关
+            isPinching: false,
+            startDistance: 0,
+            startScale: 1
         };
     }
 
@@ -661,34 +665,70 @@ class App {
 
     startDrag(e) {
         e.preventDefault();
-        this.viewerData.isDragging = true;
         
+        // 处理触摸事件
         if (e.type === 'touchstart') {
-            this.viewerData.startPos.x = e.touches[0].clientX - this.viewerData.position.x;
-            this.viewerData.startPos.y = e.touches[0].clientY - this.viewerData.position.y;
-        } else {
+            // 双指触摸 - 开始缩放
+            if (e.touches.length === 2) {
+                this.viewerData.isPinching = true;
+                this.viewerData.startDistance = this.getDistance(e.touches[0], e.touches[1]);
+                this.viewerData.startScale = this.viewerData.scale;
+            }
+            // 单指触摸 - 开始拖动
+            else if (e.touches.length === 1 && !this.viewerData.isPinching) {
+                this.viewerData.isDragging = true;
+                this.viewerData.startPos.x = e.touches[0].clientX - this.viewerData.position.x;
+                this.viewerData.startPos.y = e.touches[0].clientY - this.viewerData.position.y;
+            }
+        }
+        // 处理鼠标事件
+        else {
+            this.viewerData.isDragging = true;
             this.viewerData.startPos.x = e.clientX - this.viewerData.position.x;
             this.viewerData.startPos.y = e.clientY - this.viewerData.position.y;
         }
     }
 
     drag(e) {
-        if (!this.viewerData.isDragging) return;
         e.preventDefault();
         
-        if (e.type === 'touchmove') {
-            this.viewerData.position.x = e.touches[0].clientX - this.viewerData.startPos.x;
-            this.viewerData.position.y = e.touches[0].clientY - this.viewerData.startPos.y;
-        } else {
-            this.viewerData.position.x = e.clientX - this.viewerData.startPos.x;
-            this.viewerData.position.y = e.clientY - this.viewerData.startPos.y;
+        // 处理双指缩放
+        if (e.type === 'touchmove' && e.touches.length === 2) {
+            this.viewerData.isPinching = true;
+            const currentDistance = this.getDistance(e.touches[0], e.touches[1]);
+            const scaleFactor = currentDistance / this.viewerData.startDistance;
+            this.viewerData.scale = this.viewerData.startScale * scaleFactor;
+            
+            // 限制缩放范围
+            this.viewerData.scale = Math.max(0.5, Math.min(this.viewerData.scale, 3));
+            this.updateImageStyle();
+            return;
         }
         
-        this.updateImageStyle();
+        // 处理拖动
+        if (this.viewerData.isDragging && !this.viewerData.isPinching) {
+            if (e.type === 'touchmove') {
+                this.viewerData.position.x = e.touches[0].clientX - this.viewerData.startPos.x;
+                this.viewerData.position.y = e.touches[0].clientY - this.viewerData.startPos.y;
+            } else {
+                this.viewerData.position.x = e.clientX - this.viewerData.startPos.x;
+                this.viewerData.position.y = e.clientY - this.viewerData.startPos.y;
+            }
+            
+            this.updateImageStyle();
+        }
     }
 
     endDrag() {
         this.viewerData.isDragging = false;
+        this.viewerData.isPinching = false;
+    }
+
+    // 计算两点之间的距离
+    getDistance(touch1, touch2) {
+        const dx = touch2.clientX - touch1.clientX;
+        const dy = touch2.clientY - touch1.clientY;
+        return Math.sqrt(dx * dx + dy * dy);
     }
 
     zoom(e) {
