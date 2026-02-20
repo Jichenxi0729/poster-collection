@@ -1077,7 +1077,8 @@ class App {
             <div class="gallery-grid">
                 ${photos.map(item => `
                     <div class="gallery-item" data-photo="${item.photo}">
-                        <img src="${item.photo}" alt="${item.title}">
+                        <div class="gallery-item-loader"></div>
+                        <img data-src="${item.photo}" alt="${item.title}" class="lazy-load">
                     </div>
                 `).join('')}
             </div>
@@ -1086,12 +1087,61 @@ class App {
         // 添加返回按钮事件
         document.getElementById('backToMain').addEventListener('click', () => this.render());
         
+        // 实现图片懒加载
+        this.initLazyLoading();
+        
         // 添加图片点击事件
-        mainContent.querySelectorAll('.gallery-item img').forEach(img => {
-            img.addEventListener('click', (e) => {
-                const photo = e.target.closest('.gallery-item').dataset.photo;
+        mainContent.querySelectorAll('.gallery-item').forEach(item => {
+            item.addEventListener('click', (e) => {
+                const photo = item.dataset.photo;
                 this.openImageViewer([photo], 0);
             });
+        });
+    }
+
+    initLazyLoading() {
+        const imageObserver = new IntersectionObserver((entries, observer) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    const img = entry.target;
+                    const src = img.dataset.src;
+                    
+                    if (src) {
+                        // 添加图片加载错误处理
+                        img.onerror = function() {
+                            this.style.opacity = '0.5';
+                            this.alt = '图片加载失败';
+                            
+                            // 移除加载状态
+                            const loader = this.previousElementSibling;
+                            if (loader && loader.classList.contains('gallery-item-loader')) {
+                                loader.remove();
+                            }
+                        };
+                        
+                        img.onload = function() {
+                            this.classList.remove('lazy-load');
+                            
+                            // 移除加载状态
+                            const loader = this.previousElementSibling;
+                            if (loader && loader.classList.contains('gallery-item-loader')) {
+                                loader.remove();
+                            }
+                        };
+                        
+                        img.src = src;
+                    }
+                    
+                    observer.unobserve(img);
+                }
+            });
+        }, {
+            rootMargin: '200px 0px', // 提前200px开始加载
+            threshold: 0.1
+        });
+        
+        document.querySelectorAll('.lazy-load').forEach(img => {
+            imageObserver.observe(img);
         });
     }
 }
