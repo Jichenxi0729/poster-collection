@@ -148,6 +148,11 @@ class App {
         document.getElementById('confirmImport').addEventListener('click', () => this.confirmImport());
         document.getElementById('downloadTemplate').addEventListener('click', () => this.downloadTemplate());
         
+        // 导出按钮事件
+        document.getElementById('exportBtn').addEventListener('click', () => this.exportData());
+        // 图片总览按钮事件
+        document.getElementById('galleryBtn').addEventListener('click', () => this.openGallery());
+        
         // 图片查看器事件
         document.getElementById('closeViewer').addEventListener('click', () => this.closeImageViewer());
         document.getElementById('prevImage').addEventListener('click', () => this.showPrevImage());
@@ -213,6 +218,37 @@ class App {
     }
 
     render() {
+        // 重新渲染整个主内容区域
+        const mainContent = document.getElementById('mainContent');
+        mainContent.innerHTML = `
+            <div id="filterBar" class="filter-bar">
+                <input type="text" id="searchInput" placeholder="搜索剧名、人物..." class="search-input">
+                <select id="yearFilter" class="filter-select">
+                    <option value="">全部年份</option>
+                </select>
+                <button id="filterToggle" class="btn btn-secondary">筛选</button>
+            </div>
+
+            <div id="advancedFilters" class="advanced-filters hidden">
+                <input type="text" id="characterFilter" placeholder="人物" class="filter-input">
+                <input type="text" id="identityFilter" placeholder="身份" class="filter-input">
+                <button id="applyFilters" class="btn btn-primary">应用筛选</button>
+                <button id="resetFilters" class="btn btn-secondary">重置</button>
+            </div>
+
+            <div id="cardGrid" class="card-grid"></div>
+            <div id="emptyState" class="empty-state hidden">
+                <p>还没有剧照，点击右上角添加第一张吧！</p>
+            </div>
+        `;
+        
+        // 更新年份过滤器
+        this.updateYearFilter();
+        
+        // 重新绑定事件
+        this.bindFilterEvents();
+        
+        // 渲染卡片
         const filtered = this.getFilteredWorks();
         const grid = document.getElementById('cardGrid');
         const empty = document.getElementById('emptyState');
@@ -228,6 +264,15 @@ class App {
                 card.addEventListener('click', () => this.openDetail(parseInt(card.dataset.id)));
             });
         }
+    }
+
+    bindFilterEvents() {
+        // 重新绑定筛选相关的事件
+        document.getElementById('filterToggle').addEventListener('click', () => this.toggleAdvancedFilters());
+        document.getElementById('applyFilters').addEventListener('click', () => this.applyFilters());
+        document.getElementById('resetFilters').addEventListener('click', () => this.resetFilters());
+        document.getElementById('searchInput').addEventListener('input', () => this.handleSearch());
+        document.getElementById('yearFilter').addEventListener('change', () => this.handleSearch());
     }
 
     renderCard(work) {
@@ -300,11 +345,47 @@ class App {
     renderPhotoPreview() {
         const container = document.getElementById('photoPreview');
         container.innerHTML = this.currentPhotos.map((photo, index) => `
-            <div class="preview-item">
+            <div class="preview-item" draggable="true" data-index="${index}">
                 <img src="${photo}">
                 <button class="preview-delete" onclick="app.removePhoto(${index})">&times;</button>
+                <span class="preview-index">${index + 1}</span>
             </div>
         `).join('');
+        
+        // 添加拖拽事件监听
+        container.querySelectorAll('.preview-item').forEach(item => {
+            item.addEventListener('dragstart', (e) => this.handleDragStart(e));
+            item.addEventListener('dragover', (e) => this.handleDragOver(e));
+            item.addEventListener('drop', (e) => this.handleDrop(e));
+        });
+    }
+
+    handleDragStart(e) {
+        e.dataTransfer.setData('text/plain', e.target.dataset.index);
+        e.target.classList.add('dragging');
+    }
+
+    handleDragOver(e) {
+        e.preventDefault();
+        e.target.classList.add('drag-over');
+    }
+
+    handleDrop(e) {
+        e.preventDefault();
+        const sourceIndex = parseInt(e.dataTransfer.getData('text/plain'));
+        const targetIndex = parseInt(e.target.closest('.preview-item').dataset.index);
+        
+        if (sourceIndex !== targetIndex) {
+            // 重新排序
+            const [movedPhoto] = this.currentPhotos.splice(sourceIndex, 1);
+            this.currentPhotos.splice(targetIndex, 0, movedPhoto);
+            this.renderPhotoPreview();
+        }
+        
+        // 清理样式
+        document.querySelectorAll('.preview-item').forEach(item => {
+            item.classList.remove('dragging', 'drag-over');
+        });
     }
 
     removePhoto(index) {
@@ -422,25 +503,91 @@ class App {
         const file = e.target.files[0];
         if (!file) return;
 
+        if (file.name.endsWith('.zip')) {
+            // 处理ZIP文件
+            this.handleZipImport(file);
+        } else if (file.name.endsWith('.json')) {
+            // 处理普通JSON文件
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                try {
+                    const jsonText = event.target.result;
+                    const parsedData = JSON.parse(jsonText);
+                    this.importData = parsedData.works || [];
+                    this.renderImportPreview();
+                } catch (error) {
+                    alert('文件解析失败：' + error.message);
+                }
+            };
+            reader.readAsText(file, 'utf-8');
+        } else if (file.name.endsWith('.csv') || file.name.endsWith('.xlsx') || file.name.endsWith('.xls')) {
+            // 处理原有格式
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                try {
+                    let data;
+                    if (file.name.endsWith('.csv')) {
+                        data = this.parseCSV(event.target.result);
+                    } else {
+                        data = this.parseExcel(event.target.result);
+                    }
+                    this.importData = data;
+                    this.renderImportPreview();
+                } catch (error) {
+                    alert('文件解析失败：' + error.message);
+                }
+            };
+            reader.readAsArrayBuffer(file);
+        } else {
+            alert('不支持的文件格式');
+        }
+    }
+
+    // 处理ZIP导入
+    handleZipImport(zipFile) {
+        // 显示导入进度
+        const progress = document.createElement('div');
+        progress.style.position = 'fixed';
+        progress.style.top = '50%';
+        progress.style.left = '50%';
+        progress.style.transform = 'translate(-50%, -50%)';
+        progress.style.background = 'rgba(0, 0, 0, 0.8)';
+        progress.style.color = 'white';
+        progress.style.padding = '20px';
+        progress.style.borderRadius = '8px';
+        progress.style.zIndex = '1000';
+        progress.textContent = '正在解析压缩文件...';
+        document.body.appendChild(progress);
+        
         const reader = new FileReader();
         reader.onload = (event) => {
-            try {
-                let data;
-                if (file.name.endsWith('.csv')) {
-                    data = this.parseCSV(event.target.result);
-                } else if (file.name.endsWith('.xlsx') || file.name.endsWith('.xls')) {
-                    data = this.parseExcel(event.target.result);
-                } else {
-                    alert('不支持的文件格式');
-                    return;
-                }
-                this.importData = data;
-                this.renderImportPreview();
-            } catch (error) {
-                alert('文件解析失败：' + error.message);
-            }
+            const zip = new JSZip();
+            zip.loadAsync(event.target.result)
+                .then(zipContent => {
+                    // 查找data.json文件
+                    zipContent.file('data.json').async('string')
+                        .then(content => {
+                            try {
+                                const parsedData = JSON.parse(content);
+                                this.importData = parsedData.works || [];
+                                this.renderImportPreview();
+                            } catch (error) {
+                                alert('ZIP文件中的数据解析失败：' + error.message);
+                            }
+                        })
+                        .catch(error => {
+                            alert('ZIP文件中未找到data.json文件：' + error.message);
+                        })
+                        .finally(() => {
+                            document.body.removeChild(progress);
+                        });
+                })
+                .catch(error => {
+                    alert('ZIP文件加载失败：' + error.message);
+                    document.body.removeChild(progress);
+                });
         };
-        reader.readAsArrayBuffer(file);
+        reader.readAsArrayBuffer(zipFile);
     }
 
     parseCSV(csvText) {
@@ -538,6 +685,13 @@ class App {
             return;
         }
 
+        // 检查DOM元素是否存在
+        if (!preview || !table || !count || !confirmBtn) {
+            console.error('导入预览所需的DOM元素不存在');
+            alert('导入预览初始化失败，请重试');
+            return;
+        }
+
         const headers = ['剧名', '年份', '集数', '人物', '身份', '时间戳'];
         const previewData = this.importData.slice(0, 10);
 
@@ -571,14 +725,25 @@ class App {
         if (!confirmed) return;
 
         try {
+            let importedCount = 0;
+            
             for (const work of this.importData) {
-                work.createdAt = new Date().toISOString();
+                // 保留原始的createdAt（如果有）
+                if (!work.createdAt) {
+                    work.createdAt = new Date().toISOString();
+                }
+                
+                // 移除id属性，让数据库自动分配
+                delete work.id;
+                
                 await this.db.add(work);
+                importedCount++;
             }
+            
             await this.loadWorks();
             this.render();
             this.closeImportModal();
-            alert(`成功导入 ${this.importData.length} 条数据！`);
+            alert(`成功导入 ${importedCount} 条数据！`);
         } catch (error) {
             alert('导入失败：' + error.message);
         }
@@ -752,6 +917,182 @@ class App {
             this.resetViewer();
         }
         this.updateImageStyle();
+    }
+
+    async exportData() {
+        try {
+            // 显示导出选项
+            const useCompression = confirm('检测到您的数据较大，是否使用压缩模式导出？\n\n压缩模式：\n• 减少文件体积约70%\n• 适合大型图片集合\n• 导出时间稍长\n\n普通模式：\n• 保持原始数据质量\n• 适合小型集合\n• 导出速度快');
+            
+            // 获取所有作品数据
+            const allWorks = await this.db.getAll();
+            
+            // 图片处理选项
+            const options = {
+                compressImages: useCompression,
+                maxWidth: 1920,
+                quality: 0.7
+            };
+            
+            // 处理图片
+            if (options.compressImages && allWorks.length > 0) {
+                // 显示处理进度
+                const progress = document.createElement('div');
+                progress.style.position = 'fixed';
+                progress.style.top = '50%';
+                progress.style.left = '50%';
+                progress.style.transform = 'translate(-50%, -50%)';
+                progress.style.background = 'rgba(0, 0, 0, 0.8)';
+                progress.style.color = 'white';
+                progress.style.padding = '20px';
+                progress.style.borderRadius = '8px';
+                progress.style.zIndex = '1000';
+                progress.textContent = '正在处理图片... 0%';
+                document.body.appendChild(progress);
+                
+                // 分批次处理图片
+                const totalWorks = allWorks.length;
+                for (let i = 0; i < totalWorks; i++) {
+                    const work = allWorks[i];
+                    if (work.photos && work.photos.length > 0) {
+                        work.photos = await Promise.all(
+                            work.photos.map(photo => this.compressImage(photo, options.maxWidth, options.quality))
+                        );
+                    }
+                    
+                    // 更新进度
+                    const percent = Math.round((i + 1) / totalWorks * 100);
+                    progress.textContent = `正在处理图片... ${percent}%`;
+                }
+                
+                // 移除进度条
+                document.body.removeChild(progress);
+            }
+            
+            // 创建导出数据对象
+            const exportData = {
+                version: '1.1',
+                exportDate: new Date().toISOString(),
+                totalWorks: allWorks.length,
+                options: options,
+                works: allWorks
+            };
+            
+            if (useCompression) {
+                // 使用JSZip压缩
+                const zip = new JSZip();
+                zip.file('data.json', JSON.stringify(exportData, null, 2));
+                
+                // 生成ZIP文件并下载
+                zip.generateAsync({ type: 'blob' })
+                    .then(blob => {
+                        const link = document.createElement('a');
+                        link.href = URL.createObjectURL(blob);
+                        link.download = `剧照收集导出_${new Date().toISOString().split('T')[0]}.zip`;
+                        link.click();
+                        setTimeout(() => URL.revokeObjectURL(link.href), 100);
+                        alert(`成功导出 ${allWorks.length} 个作品的数据！`);
+                    });
+            } else {
+                // 普通JSON导出
+                const jsonString = JSON.stringify(exportData, null, 2);
+                const blob = new Blob([jsonString], { type: 'application/json;charset=utf-8;' });
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(blob);
+                link.download = `剧照收集导出_${new Date().toISOString().split('T')[0]}.json`;
+                link.click();
+                setTimeout(() => URL.revokeObjectURL(link.href), 100);
+                alert(`成功导出 ${allWorks.length} 个作品的数据！`);
+            }
+        } catch (error) {
+            alert('导出失败：' + error.message);
+        }
+    }
+
+    // 图片压缩方法
+    compressImage(imageData, maxWidth = 1920, quality = 0.7) {
+        return new Promise((resolve) => {
+            // 跳过非Data URL格式
+            if (!imageData.startsWith('data:image/')) {
+                resolve(imageData);
+                return;
+            }
+            
+            const canvas = document.createElement('canvas');
+            const img = new Image();
+            img.onload = () => {
+                // 计算新尺寸
+                let width = img.width;
+                let height = img.height;
+                if (width > maxWidth) {
+                    height = (height * maxWidth) / width;
+                    width = maxWidth;
+                }
+                canvas.width = width;
+                canvas.height = height;
+                
+                // 绘制并压缩
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0, width, height);
+                
+                // 转换为Data URL
+                const compressedData = canvas.toDataURL('image/jpeg', quality);
+                resolve(compressedData);
+            };
+            img.src = imageData;
+        });
+    }
+
+    async openGallery() {
+        // 收集所有图片
+        const allWorks = await this.db.getAll();
+        const allPhotos = [];
+        
+        allWorks.forEach(work => {
+            if (work.photos && work.photos.length > 0) {
+                work.photos.forEach(photo => {
+                    allPhotos.push({
+                        id: `${work.id}_${allPhotos.length}`,
+                        photo: photo,
+                        title: work.title,
+                        year: work.year,
+                        character: work.character
+                    });
+                });
+            }
+        });
+        
+        // 创建图片总览页面
+        this.renderGallery(allPhotos);
+    }
+
+    renderGallery(photos) {
+        const mainContent = document.getElementById('mainContent');
+        mainContent.innerHTML = `
+            <div class="gallery-header">
+                <h2>图片总览</h2>
+                <p>共 ${photos.length} 张图片</p>
+                <button id="backToMain" class="btn btn-secondary">返回主页</button>
+            </div>
+            <div class="gallery-grid">
+                ${photos.map(item => `
+                    <div class="gallery-item" data-photo="${item.photo}">
+                        <img src="${item.photo}" alt="${item.title}">
+                    </div>
+                `).join('')}
+            </div>
+        `;
+        
+        // 添加返回按钮事件
+        document.getElementById('backToMain').addEventListener('click', () => this.render());
+        
+        // 添加图片点击事件
+        mainContent.querySelectorAll('.gallery-item img').forEach(img => {
+            img.addEventListener('click', (e) => {
+                const photo = e.target.closest('.gallery-item').dataset.photo;
+                this.openImageViewer([photo], 0);
+            });
+        });
     }
 }
 
